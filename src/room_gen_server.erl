@@ -12,7 +12,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0]).
+-export([start_link/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
@@ -20,30 +20,30 @@
 
 -define(SERVER, ?MODULE).
 
--record(room_gen_server_state, {}).
+-record(room_gen_server_state, {name, creator, connected_users}).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 
 %% @doc Spawns the server and registers the local name (unique)
--spec(start_link() ->
+-spec(start_link(_Args::term()) ->
   {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
-start_link() ->
-  gen_server:start_link(?MODULE, [], []).
+start_link([RoomName, RoomCreatorUsername]) ->
+  gen_server:start_link(?MODULE, [RoomName, RoomCreatorUsername],[]).
 
 %%%===================================================================
 %%% gen_server callbacks
-%%%===================================================================
+%%%===================================================================a
 
 %% @private
 %% @doc Initializes the server
--spec(init(Args :: term()) ->
+-spec(init(_Args::term()) ->
   {ok, State :: #room_gen_server_state{}} | {ok, State :: #room_gen_server_state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
-init([]) ->
+init([RoomName, RoomCreatorUsername]) ->
   io:format("Starting the room_gen_server ~n"),
-  {ok, #room_gen_server_state{}}.
+  {ok, #room_gen_server_state{name = RoomName,creator = RoomCreatorUsername, connected_users = [RoomCreatorUsername]}}.
 
 %% @private
 %% @doc Handling call messages
@@ -64,6 +64,15 @@ handle_call(_Request, _From, State = #room_gen_server_state{}) ->
   {noreply, NewState :: #room_gen_server_state{}} |
   {noreply, NewState :: #room_gen_server_state{}, timeout() | hibernate} |
   {stop, Reason :: term(), NewState :: #room_gen_server_state{}}).
+handle_cast({broadcast, Sender, Message}, State = #room_gen_server_state{connected_users=Users}) ->
+  lists:foreach(
+    fun(Username)->
+      UserPid = whereis(list_to_atom(Username)),
+      gen_server:cast(UserPid, {send_message, Message, Sender, State#room_gen_server_state.name})
+      end,
+    Users
+  ),
+  {noreply, State};
 handle_cast(_Request, State = #room_gen_server_state{}) ->
   {noreply, State}.
 
@@ -97,3 +106,4 @@ code_change(_OldVsn, State = #room_gen_server_state{}, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
