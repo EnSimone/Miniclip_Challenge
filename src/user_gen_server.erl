@@ -121,7 +121,11 @@ handle_cast(leave_room, S = #user_gen_server_state{socket=Socket}) ->
   send(Socket, Str,[]),
   {noreply, S#user_gen_server_state{next=leave_room}};
 
-handle_cast({send_message, Message, Sender}, S = #user_gen_server_state{socket=Socket}) ->
+handle_cast({send_message, Message, RoomName}, S = #user_gen_server_state{socket=Socket}) ->
+  send(Socket, Message,[RoomName]),
+  {noreply, S};
+
+handle_cast({send_message_to_user, Message, Sender}, S = #user_gen_server_state{socket=Socket}) ->
   Str = "Received message ~p from user ~p \r\n",
   send(Socket, Str,[Message, Sender]),
   {noreply, S};
@@ -232,12 +236,19 @@ handle_info({tcp, Socket, Str}, S = #user_gen_server_state{socket=Socket, next=j
   RoomName = line(Str),
   Message = "You choose to join a room named ~s\r\n",
   send(Socket,Message, [RoomName]),
+  room_gen_server:join_room(self(), RoomName, S#user_gen_server_state.name),
   gen_server:cast(self(), main_menu),
   {noreply, S};
 
 handle_info({tcp, Socket, Str}, S = #user_gen_server_state{next=room_request}) ->
   RoomName = line(Str),
-  gen_server:cast(self(), message_request),
+  RoomPid = whereis(list_to_atom(RoomName)),
+  case RoomPid of
+    undefined -> Log = ("The selected Room does not exist \r\n"),
+      send(Socket, Log, []),
+      gen_server:cast(self(), main_menu);
+    _->gen_server:cast(self(), message_request)
+  end,
   {noreply, S#user_gen_server_state{room_to_broadcast = RoomName}};
 
 handle_info({tcp, Socket, Str}, S = #user_gen_server_state{next=user_for_message}) ->
@@ -246,11 +257,14 @@ handle_info({tcp, Socket, Str}, S = #user_gen_server_state{next=user_for_message
   {noreply, S#user_gen_server_state{user_for_message = Username}};
 
 handle_info({tcp, Socket, Str}, S = #user_gen_server_state{room_to_broadcast = RoomName, next=message_request}) ->
-  Message = line(Str),
+  Message = format(Str),
+  FormattedMessage = replace(Message),
   RoomPid = whereis(list_to_atom(RoomName)),
   case RoomPid of
-    undefined -> io:format("The selected Room does not exist");
-    _->gen_server:cast(RoomPid, {broadcast, S#user_gen_server_state.name, Message})
+    undefined -> Log = ("The selected Room does not exist \r\n"),
+    send(Socket, Log, []),
+    gen_server:cast(self(), main_menu);
+    _->gen_server:cast(RoomPid, {broadcast, S#user_gen_server_state.name, FormattedMessage})
   end,
   gen_server:cast(self(), main_menu),
   {noreply, S};
@@ -263,7 +277,7 @@ handle_info({tcp, Socket, Str}, S = #user_gen_server_state{user_for_message = Us
     undefined -> Log = ("The selected user does not exist, please insert an existing user \r\n"),
       send(Socket, Log, []),
       gen_server:cast(self(), message_to_user);
-    _->gen_server:cast(UserPid, {send_message, FormattedMessage, S#user_gen_server_state.name}),
+    _->gen_server:cast(UserPid, {send_message_to_user, FormattedMessage, S#user_gen_server_state.name}),
       gen_server:cast(self(),main_menu)
   end,
   {noreply, S};

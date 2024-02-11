@@ -12,11 +12,11 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/1]).
+-export([start_link/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
-  code_change/3]).
+  code_change/3, join_room/3]).
 
 -define(SERVER, ?MODULE).
 
@@ -27,10 +27,10 @@
 %%%===================================================================
 
 %% @doc Spawns the server and registers the local name (unique)
--spec(start_link(_Args::term()) ->
+-spec(start_link(_Arg0::term(), _Arg1::term()) ->
   {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
-start_link([RoomName, RoomCreatorUsername]) ->
-  gen_server:start_link(?MODULE, [RoomName, RoomCreatorUsername],[]).
+start_link(RoomName, RoomCreatorUsername) ->
+  gen_server:start_link(?MODULE, [RoomName, RoomCreatorUsername] , []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -42,7 +42,8 @@ start_link([RoomName, RoomCreatorUsername]) ->
   {ok, State :: #room_gen_server_state{}} | {ok, State :: #room_gen_server_state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
 init([RoomName, RoomCreatorUsername]) ->
-  io:format("Starting the room_gen_server ~n"),
+  io:format("Starting the room_gen_server ~s~n",[RoomName]),
+  register(list_to_atom(RoomName),self()),
   {ok, #room_gen_server_state{name = RoomName,creator = RoomCreatorUsername, connected_users = [RoomCreatorUsername]}}.
 
 %% @private
@@ -73,6 +74,19 @@ handle_cast({broadcast, Sender, Message}, State = #room_gen_server_state{connect
     Users
   ),
   {noreply, State};
+
+handle_cast({join, UserPid, Username}, State = #room_gen_server_state{connected_users=Users}) ->
+  Member = lists:member(Username, Users),
+  if Member =:= false ->
+    Str = "Hello, i entered the room",
+    gen_server:cast(self(), {broadcast, Username,Str}),
+    {noreply, State#room_gen_server_state{connected_users = [Username | Users]}};
+    true ->
+      Message = "You already joined the room ~s\r\n",
+      gen_server:cast(UserPid, {send_message, Message, State#room_gen_server_state.name}),
+      {noreply, State}
+  end;
+
 handle_cast(_Request, State = #room_gen_server_state{}) ->
   {noreply, State}.
 
@@ -103,6 +117,17 @@ terminate(_Reason, _State = #room_gen_server_state{}) ->
 code_change(_OldVsn, State = #room_gen_server_state{}, _Extra) ->
   {ok, State}.
 
+join_room(UserPid, RoomName, Username) ->
+  RoomExists = room_exists(RoomName),
+  if RoomExists =:= true ->
+    gen_server:cast(whereis(list_to_atom(RoomName)), {join, UserPid, Username});
+    true ->
+      Str = "Room ~s does not exist, select another room",
+      gen_server:cast(UserPid, {send_message, Str, RoomName})
+  end.
+
+room_exists(RoomName) ->
+  whereis(list_to_atom(RoomName)) =/= undefined.
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================

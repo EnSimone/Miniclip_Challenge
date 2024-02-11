@@ -42,16 +42,15 @@ create_room(UserPid, RoomName, RoomCreatorUsername) ->
       shutdown => 2000,
       type => worker,
       modules => ['room_gen_server']},
-    case supervisor:start_child(room_gen_server, [RoomName, RoomCreatorUsername]) of
-      {ok, RoomPid} ->
-        register(list_to_atom(RoomName),RoomPid),
-        Str = io:format("Room ~s created ~n", [RoomName]),
-        gen_server:cast(UserPid, {send_message, Str});
+    case supervisor:start_child(?MODULE, [RoomName, RoomCreatorUsername]) of
+      {ok, _} ->
+        Str = ("Room ~s created\r\n"),
+        gen_server:cast(UserPid, {send_message, Str, RoomName});
       _ -> io:format("Error starting the room_gen_server")
     end;
     true ->
-      Str = io:format("Room with name ~s already exists, please select a new room's name or join the selected one!", [RoomName]),
-      gen_server:cast(UserPid, {send_message, Str})
+      Str = "Room with name ~s already exists, please select a new room's name or join the selected one\r\n",
+      gen_server:cast(UserPid, {send_message, Str, RoomName})
   end.
 
 list_rooms(_Arg0) ->
