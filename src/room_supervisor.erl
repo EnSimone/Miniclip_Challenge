@@ -50,7 +50,7 @@ create_room(UserPid, RoomName, RoomCreatorUsername) ->
       _ -> io:format("Error starting the room_gen_server")
     end;
     true ->
-      Str = io:format("Room with name ~s already exists - consider joining it!", [RoomName]),
+      Str = io:format("Room with name ~s already exists, please select a new room's name or join the selected one!", [RoomName]),
       gen_server:cast(UserPid, {send_message, Str})
   end.
 
