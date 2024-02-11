@@ -257,12 +257,13 @@ handle_info({tcp, Socket, Str}, S = #user_gen_server_state{room_to_broadcast = R
 
 handle_info({tcp, Socket, Str}, S = #user_gen_server_state{user_for_message = Username, next=message_to_user_request}) ->
   Message = format(Str),
+  FormattedMessage = replace(Message),
   UserPid = whereis(list_to_atom(Username)),
   case UserPid of
     undefined -> Log = ("The selected user does not exist, please insert an existing user \r\n"),
       send(Socket, Log, []),
       gen_server:cast(self(), message_to_user);
-    _->gen_server:cast(UserPid, {send_message, Message, S#user_gen_server_state.name}),
+    _->gen_server:cast(UserPid, {send_message, FormattedMessage, S#user_gen_server_state.name}),
       gen_server:cast(self(),main_menu)
   end,
   {noreply, S};
@@ -280,6 +281,9 @@ line(Str) ->
 
 format(Str) ->
   hd(string:tokens(Str, "\n")).
+
+replace(Str)->
+  hd(string:replace(Str, "\r", "")).
 
 %% @private
 %% @doc This function is called by a gen_server when it is about to
