@@ -29,5 +29,6 @@ Mandatory task:
 -----
 	1) Erlang project setup (erlang_project_setup on git's commit) - 04/02/2024
 	2) Accept multiple TCP/IP client connections at the same time (multiple_connections on git's commit) - 06/02/2024
+	3) Handle rooms (rooms on git's commit) - 13/02/2024
 	6) Send private messages (private_messages on git's commit) - 10/02/2024
 -----
