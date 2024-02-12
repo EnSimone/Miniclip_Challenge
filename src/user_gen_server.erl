@@ -45,7 +45,7 @@ start_link(Socket) ->
   %%{ok, State :: #user_gen_server_state{}} | {ok, State :: #user_gen_server_state{}, timeout() | hibernate} |
   %%{stop, Reason :: term()} | ignore).
 init(Socket) ->
-  io:format("Starting the user_gen_server ~n"),
+  io:format("Starting user_gen_server ~n"),
   <<A:32, B:32, C:32>> = crypto:strong_rand_bytes(12),
   random:seed({A,B,C}), %%using random:seed that is a deprecated because i did not find an equivalent function using rand
   gen_server:cast(self(), accept),
@@ -106,10 +106,10 @@ handle_cast(delete_room, S = #user_gen_server_state{socket=Socket}) ->
   send(Socket, Str,[]),
   {noreply, S#user_gen_server_state{next=delete_room}};
 
-handle_cast(list_rooms, S = #user_gen_server_state{socket=Socket}) ->
-  %%List all rooms
+handle_cast(list_rooms, S = #user_gen_server_state{}) ->
+  list_rooms_gen_server:list(self()),
   gen_server:cast(self(), main_menu),
-  {noreply, S};
+  {noreply, S#user_gen_server_state{}};
 
 handle_cast(join_room, S = #user_gen_server_state{socket=Socket}) ->
   Str = "Which is the name of the room that you want to join? \r\n",
@@ -120,6 +120,10 @@ handle_cast(leave_room, S = #user_gen_server_state{socket=Socket}) ->
   Str = "Which is the name of the room that you want to leave? \r\n",
   send(Socket, Str,[]),
   {noreply, S#user_gen_server_state{next=leave_room}};
+
+handle_cast({send_message, Message}, S = #user_gen_server_state{socket=Socket}) ->
+  send(Socket, Message,[]),
+  {noreply, S};
 
 handle_cast({send_message, Message, RoomName}, S = #user_gen_server_state{socket=Socket}) ->
   send(Socket, Message,[RoomName]),
@@ -218,10 +222,16 @@ handle_info({tcp, Socket, Str}, S = #user_gen_server_state{socket=Socket, next=c
   gen_server:cast(self(), main_menu),
   {noreply, S};
 
+handle_info({tcp, Socket}, S = #user_gen_server_state{socket=Socket, next=list_room}) ->
+  list_rooms_gen_server:list(self()),
+  gen_server:cast(self(), main_menu),
+  {noreply, S};
+
 handle_info({tcp, Socket, Str}, S = #user_gen_server_state{socket=Socket, next=delete_room}) ->
   RoomName = line(Str),
   Message = "You choose to delete a room named ~s\r\n",
   send(Socket, Message, [RoomName]),
+  room_gen_server:delete_room(self(), RoomName, S#user_gen_server_state.name),
   gen_server:cast(self(), main_menu),
   {noreply, S};
 
@@ -229,6 +239,7 @@ handle_info({tcp, Socket, Str}, S = #user_gen_server_state{socket=Socket, next=l
   RoomName = line(Str),
   Message = "You choose to leave a room named ~s\r\n",
   send(Socket,Message, [RoomName]),
+  room_gen_server:leave_room(self(), RoomName, S#user_gen_server_state.name),
   gen_server:cast(self(), main_menu),
   {noreply, S};
 

@@ -40,7 +40,13 @@ init([]) ->
                   restart =>  permanent,
                   shutdown => 2000,
                   type => supervisor,
-                  modules => [room_supervisor]}],
+                  modules => [room_supervisor]},
+                  #{id => list_room_sup_id,
+                  start => {list_rooms_supervisor, start_link, []},
+                  restart =>  permanent,
+                  shutdown => 2000,
+                  type => supervisor,
+                  modules => [list_rooms_supervisor]}],
     {ok, {SupFlags, ChildSpecs}}.
 
 %% internal functions

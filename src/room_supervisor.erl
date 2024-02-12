@@ -9,20 +9,20 @@
 -behaviour(supervisor).
 
 -export([start_link/0, init/1]).
--export([create_room/3, list_rooms/1, delete_room/2]).
+-export([create_room/3]).
 
 start_link() ->
   supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init([]) ->
-  io:format("Starting the room_supervisor ~n"),
+  io:format("Starting room_supervisor ~n"),
   SupFlags = #{strategy => simple_one_for_one,
     intensity => 1000,
     period => 3600},
 
   RoomChild = #{id => 'room',
     start => {room_gen_server, start_link, []},
-    restart => permanent,
+    restart => transient,
     shutdown => 2000,
     type => worker,
     modules => [room_gen_server]},
@@ -36,15 +36,10 @@ create_room(UserPid, RoomName, RoomCreatorUsername) ->
   RoomExists = room_exists(RoomName),
   if RoomExists =:= false ->
     io:format("Room named ~s does not exist, creating it ~n", [RoomName]),
-    _AChild = #{id => 'room',
-      start => {'room_gen_server', start_link, [RoomName, RoomCreatorUsername]},
-      restart => permanent,
-      shutdown => 2000,
-      type => worker,
-      modules => ['room_gen_server']},
     case supervisor:start_child(?MODULE, [RoomName, RoomCreatorUsername]) of
       {ok, _} ->
         Str = ("Room ~s created\r\n"),
+        list_rooms_gen_server:add(RoomName),
         gen_server:cast(UserPid, {send_message, Str, RoomName});
       _ -> io:format("Error starting the room_gen_server")
     end;
@@ -53,10 +48,3 @@ create_room(UserPid, RoomName, RoomCreatorUsername) ->
       gen_server:cast(UserPid, {send_message, Str, RoomName})
   end.
 
-list_rooms(_Arg0) ->
-  %%erlang:error(not_implemented)
-  ok.
-
-delete_room(_Arg0, _Arg1) ->
-  %%erlang:error(not_implemented)
-  ok.

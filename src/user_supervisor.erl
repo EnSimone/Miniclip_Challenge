@@ -14,7 +14,7 @@ start_link() ->
   supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init([]) ->
-  io:format("Starting the user_supervisor ~n"),
+  io:format("Starting user_supervisor ~n"),
   {ok, ListenSocket} = gen_tcp:listen(8080, [{active,once}, {packet,line}]),
   spawn_link(fun empty_listeners/0),
   {ok, {{simple_one_for_one, 60, 3600},

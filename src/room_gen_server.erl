@@ -16,7 +16,7 @@
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
-  code_change/3, join_room/3]).
+  code_change/3, join_room/3, leave_room/3, delete_room/3]).
 
 -define(SERVER, ?MODULE).
 
@@ -42,7 +42,7 @@ start_link(RoomName, RoomCreatorUsername) ->
   {ok, State :: #room_gen_server_state{}} | {ok, State :: #room_gen_server_state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
 init([RoomName, RoomCreatorUsername]) ->
-  io:format("Starting the room_gen_server ~s~n",[RoomName]),
+  io:format("Starting room_gen_server ~s~n",[RoomName]),
   register(list_to_atom(RoomName),self()),
   {ok, #room_gen_server_state{name = RoomName,creator = RoomCreatorUsername, connected_users = [RoomCreatorUsername]}}.
 
@@ -65,15 +65,24 @@ handle_call(_Request, _From, State = #room_gen_server_state{}) ->
   {noreply, NewState :: #room_gen_server_state{}} |
   {noreply, NewState :: #room_gen_server_state{}, timeout() | hibernate} |
   {stop, Reason :: term(), NewState :: #room_gen_server_state{}}).
+
 handle_cast({broadcast, Sender, Message}, State = #room_gen_server_state{connected_users=Users}) ->
-  lists:foreach(
-    fun(Username)->
-      UserPid = whereis(list_to_atom(Username)),
-      gen_server:cast(UserPid, {send_message, Message, Sender, State#room_gen_server_state.name})
-      end,
-    Users
-  ),
-  {noreply, State};
+  UserPid = whereis(list_to_atom(Sender)),
+  Member = lists:member(Sender, Users),
+  if Member =:= false ->
+    Str = "You can not publish a message in a room, you did not join it, please join the room before sending it\r\n",
+    gen_server:cast(UserPid, {send_message, Str}),
+    {noreply, State};
+    true ->
+      lists:foreach(
+        fun(Username)->
+          UserPidDestination = whereis(list_to_atom(Username)),
+          gen_server:cast(UserPidDestination, {send_message, Message, Sender, State#room_gen_server_state.name})
+          end,
+        Users
+      ),
+      {noreply, State}
+  end;
 
 handle_cast({join, UserPid, Username}, State = #room_gen_server_state{connected_users=Users}) ->
   Member = lists:member(Username, Users),
@@ -83,6 +92,30 @@ handle_cast({join, UserPid, Username}, State = #room_gen_server_state{connected_
     {noreply, State#room_gen_server_state{connected_users = [Username | Users]}};
     true ->
       Message = "You already joined the room ~s\r\n",
+      gen_server:cast(UserPid, {send_message, Message, State#room_gen_server_state.name}),
+      {noreply, State}
+  end;
+
+handle_cast({leave, UserPid, Username}, State = #room_gen_server_state{connected_users=Users}) ->
+  Member = lists:member(Username, Users),
+  if Member =:= false ->
+    Message = "You were not a member of the room ~s\r\n",
+    gen_server:cast(UserPid, {send_message, Message, State#room_gen_server_state.name}),
+    {noreply, State};
+    true ->
+    NewUsers = Users--[Username],
+    Str = "Goodbye, you left the room ~s\r\n",
+    gen_server:cast(UserPid, {send_message, Str, State#room_gen_server_state.name}),
+    {noreply, State#room_gen_server_state{connected_users = NewUsers}}
+  end;
+
+handle_cast({delete, UserPid, Username}, State = #room_gen_server_state{creator = Creator}) ->
+  if Username =:= Creator ->
+    Str = "You deleted the room ~s\r\n",
+    gen_server:cast(UserPid, {send_message, Str, State#room_gen_server_state.name}),
+    {stop, normal, State};
+    true ->
+      Message = "You are not the creator of the room ~s\r\n",
       gen_server:cast(UserPid, {send_message, Message, State#room_gen_server_state.name}),
       {noreply, State}
   end;
@@ -107,6 +140,7 @@ handle_info(_Info, State = #room_gen_server_state{}) ->
 -spec(terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
     State :: #room_gen_server_state{}) -> term()).
 terminate(_Reason, _State = #room_gen_server_state{}) ->
+  list_rooms_gen_server:remove(_State#room_gen_server_state.name),
   ok.
 
 %% @private
@@ -122,7 +156,25 @@ join_room(UserPid, RoomName, Username) ->
   if RoomExists =:= true ->
     gen_server:cast(whereis(list_to_atom(RoomName)), {join, UserPid, Username});
     true ->
-      Str = "Room ~s does not exist, select another room",
+      Str = "Room ~s does not exist, select another room\r\n",
+      gen_server:cast(UserPid, {send_message, Str, RoomName})
+  end.
+
+leave_room(UserPid, RoomName, Username) ->
+  RoomExists = room_exists(RoomName),
+  if RoomExists =:= true ->
+    gen_server:cast(whereis(list_to_atom(RoomName)), {leave, UserPid, Username});
+    true ->
+      Str = "Room ~s does not exist, select another room\r\n",
+      gen_server:cast(UserPid, {send_message, Str, RoomName})
+  end.
+
+delete_room(UserPid, RoomName, Username) ->
+  RoomExists = room_exists(RoomName),
+  if RoomExists =:= true ->
+    gen_server:cast(whereis(list_to_atom(RoomName)), {delete, UserPid, Username});
+    true ->
+      Str = "Room ~s does not exist, select another room\r\n",
       gen_server:cast(UserPid, {send_message, Str, RoomName})
   end.
 
