@@ -21,7 +21,7 @@
 
 -define(SERVER, ?MODULE).
 
--record(user_gen_server_state, {username, message, socket, next, name, room_to_broadcast, user_for_message}).
+-record(user_gen_server_state, {username, message, socket, next, name, room_to_broadcast, user_for_message, user_to_invite_private_room}).
 
 
 %%%===================================================================
@@ -92,6 +92,7 @@ handle_cast(main_menu, S = #user_gen_server_state{socket=Socket}) ->
     "  Press 5 to leave a room\r\n" ++
     "  Press 6 to send a message to a specific user\r\n" ++
     "  Press 7 to create a private room\r\n" ++
+    "  Press 8 to invite a user in a private room in which you are a member\r\n" ++
     "  Press 0 to delete a room (only if you are the creator)\r\n",
   send(Socket, Str, []),
   {noreply, S#user_gen_server_state{next=room_manager}};
@@ -100,6 +101,11 @@ handle_cast(create_room, S = #user_gen_server_state{socket=Socket}) ->
   Str = "Which is the name of the room that you want to create? \r\n",
   send(Socket, Str,[]),
   {noreply, S#user_gen_server_state{next=create_room}};
+
+handle_cast(create_private_room, S = #user_gen_server_state{socket=Socket}) ->
+  Str = "Which is the name of the private room that you want to create? \r\n",
+  send(Socket, Str,[]),
+  {noreply, S#user_gen_server_state{next=create_private_room}};
 
 handle_cast(delete_room, S = #user_gen_server_state{socket=Socket}) ->
   Str = "Which is the name of the room that you want to delete? \r\n",
@@ -115,6 +121,11 @@ handle_cast(join_room, S = #user_gen_server_state{socket=Socket}) ->
   Str = "Which is the name of the room that you want to join? \r\n",
   send(Socket, Str,[]),
   {noreply, S#user_gen_server_state{next=join_room}};
+
+handle_cast(invite_private_room, S = #user_gen_server_state{socket=Socket}) ->
+  Str = "Which is the name of the user that you want to invite? \r\n",
+  send(Socket, Str,[]),
+  {noreply, S#user_gen_server_state{next=invite_private_room}};
 
 handle_cast(leave_room, S = #user_gen_server_state{socket=Socket}) ->
   Str = "Which is the name of the room that you want to leave? \r\n",
@@ -153,6 +164,11 @@ handle_cast(broadcast, S = #user_gen_server_state{socket=Socket}) ->
   Str = "In which room do you want to publish the message? \r\n",
   send(Socket, Str,[]),
   {noreply, S#user_gen_server_state{next=room_request}};
+
+handle_cast(private_room_name, S = #user_gen_server_state{socket=Socket}) ->
+  Str = "In which room do you want to invite the user? \r\n",
+  send(Socket, Str,[]),
+  {noreply, S#user_gen_server_state{next=invite_user}};
 
 handle_cast(message_request, S = #user_gen_server_state{socket=Socket}) ->
   Str = "Write the message that you want to send \r\n",
@@ -203,13 +219,15 @@ handle_info({tcp, Socket, Str}, S = #user_gen_server_state{socket=Socket, next=r
       gen_server:cast(self(), message_to_user);
     "7" ->
       gen_server:cast(self(), create_private_room);
+    "8" ->
+      gen_server:cast(self(), invite_private_room);
     "0" ->
       gen_server:cast(self(), delete_room);
     "quit"++_ ->
       gen_tcp:close(S#user_gen_server_state.socket),
       {stop, normal, S};
     _ -> % ask again because we didn't get what we wanted
-      Message = "Answer with 1 (create) or 2 (list) or 3 (join) or 4 (broadcast) or 5 (leave) or 6 (message to user) or 7 (private room) or 0 (delete) \r\n",
+      Message = "Answer with 1 (create) or 2 (list) or 3 (join) or 4 (broadcast) or 5 (leave) or 6 (message to user) or 7 (private room) or 8 (invite user in private room) or 0 (delete) \r\n",
       send(Socket, Message , [])
   end,
   {noreply, S};
@@ -218,7 +236,15 @@ handle_info({tcp, Socket, Str}, S = #user_gen_server_state{socket=Socket, next=c
   RoomName = line(Str),
   Message = "You choose to create a room named ~s, creating and joining it.\r\n",
   send(Socket, Message, [RoomName]),
-  room_supervisor:create_room(self(), RoomName, S#user_gen_server_state.name),
+  room_supervisor:create_room(self(), RoomName, S#user_gen_server_state.name, true),
+  gen_server:cast(self(), main_menu),
+  {noreply, S};
+
+handle_info({tcp, Socket, Str}, S = #user_gen_server_state{socket=Socket, next=create_private_room}) ->
+  RoomName = line(Str),
+  Message = "You choose to create a private room named ~s, creating and joining it.\r\n",
+  send(Socket, Message, [RoomName]),
+  room_supervisor:create_room(self(), RoomName, S#user_gen_server_state.name, false),
   gen_server:cast(self(), main_menu),
   {noreply, S};
 
@@ -251,6 +277,14 @@ handle_info({tcp, Socket, Str}, S = #user_gen_server_state{socket=Socket, next=j
   gen_server:cast(self(), main_menu),
   {noreply, S};
 
+handle_info({tcp, Socket, Str}, S = #user_gen_server_state{socket=Socket, next=invite_user, user_to_invite_private_room = Username}) ->
+  RoomName = line(Str),
+  Message = "You invite the user ~s to join the private room ~s\r\n",
+  send(Socket,Message, [RoomName, Username]),
+  room_gen_server:invite_room(S#user_gen_server_state.name, self(), RoomName, S#user_gen_server_state.user_to_invite_private_room),
+  gen_server:cast(self(), main_menu),
+  {noreply, S};
+
 handle_info({tcp, Socket, Str}, S = #user_gen_server_state{next=room_request}) ->
   RoomName = line(Str),
   RoomPid = whereis(list_to_atom(RoomName)),
@@ -266,6 +300,11 @@ handle_info({tcp, Socket, Str}, S = #user_gen_server_state{next=user_for_message
   Username = line(Str),
   gen_server:cast(self(), message_request_for_user),
   {noreply, S#user_gen_server_state{user_for_message = Username}};
+
+handle_info({tcp, Socket, Str}, S = #user_gen_server_state{next=invite_private_room}) ->
+  Username = line(Str),
+  gen_server:cast(self(), private_room_name),
+  {noreply, S#user_gen_server_state{user_to_invite_private_room = Username}};
 
 handle_info({tcp, Socket, Str}, S = #user_gen_server_state{room_to_broadcast = RoomName, next=message_request}) ->
   Message = format(Str),

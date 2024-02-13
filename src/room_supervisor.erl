@@ -9,7 +9,7 @@
 -behaviour(supervisor).
 
 -export([start_link/0, init/1]).
--export([create_room/3]).
+-export([create_room/4]).
 
 start_link() ->
   supervisor:start_link({local, ?MODULE}, ?MODULE, []).
@@ -32,14 +32,17 @@ init([]) ->
 room_exists(RoomName) ->
   whereis(list_to_atom(RoomName)) =/= undefined.
 
-create_room(UserPid, RoomName, RoomCreatorUsername) ->
+create_room(UserPid, RoomName, RoomCreatorUsername, IsPublic) ->
   RoomExists = room_exists(RoomName),
   if RoomExists =:= false ->
     io:format("Room named ~s does not exist, creating it ~n", [RoomName]),
-    case supervisor:start_child(?MODULE, [RoomName, RoomCreatorUsername]) of
+    case supervisor:start_child(?MODULE, [RoomName, RoomCreatorUsername, IsPublic]) of
       {ok, _} ->
         Str = ("Room ~s created\r\n"),
-        list_rooms_gen_server:add(RoomName),
+        case IsPublic of
+          true -> list_rooms_gen_server:add(RoomName);
+          _ -> nothing
+        end,
         gen_server:cast(UserPid, {send_message, Str, RoomName});
       _ -> io:format("Error starting the room_gen_server")
     end;

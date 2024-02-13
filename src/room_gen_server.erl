@@ -12,25 +12,25 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/2]).
+-export([start_link/3]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
-  code_change/3, join_room/3, leave_room/3, delete_room/3]).
+  code_change/3, join_room/3, leave_room/3, delete_room/3, invite_room/4]).
 
 -define(SERVER, ?MODULE).
 
--record(room_gen_server_state, {name, creator, connected_users}).
+-record(room_gen_server_state, {name, creator, connected_users, ispublic}).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 
 %% @doc Spawns the server and registers the local name (unique)
--spec(start_link(_Arg0::term(), _Arg1::term()) ->
+-spec(start_link(_Arg0::term(), _Arg1::term(), _Arg2::term()) ->
   {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
-start_link(RoomName, RoomCreatorUsername) ->
-  gen_server:start_link(?MODULE, [RoomName, RoomCreatorUsername] , []).
+start_link(RoomName, RoomCreatorUsername, IsPublic) ->
+  gen_server:start_link(?MODULE, [RoomName, RoomCreatorUsername, IsPublic] , []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -41,10 +41,10 @@ start_link(RoomName, RoomCreatorUsername) ->
 -spec(init(_Args::term()) ->
   {ok, State :: #room_gen_server_state{}} | {ok, State :: #room_gen_server_state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
-init([RoomName, RoomCreatorUsername]) ->
+init([RoomName, RoomCreatorUsername, IsPublic]) ->
   io:format("Starting room_gen_server ~s~n",[RoomName]),
   register(list_to_atom(RoomName),self()),
-  {ok, #room_gen_server_state{name = RoomName,creator = RoomCreatorUsername, connected_users = [RoomCreatorUsername]}}.
+  {ok, #room_gen_server_state{name = RoomName,creator = RoomCreatorUsername, connected_users = [RoomCreatorUsername], ispublic = IsPublic}}.
 
 %% @private
 %% @doc Handling call messages
@@ -84,16 +84,43 @@ handle_cast({broadcast, Sender, Message}, State = #room_gen_server_state{connect
       {noreply, State}
   end;
 
-handle_cast({join, UserPid, Username}, State = #room_gen_server_state{connected_users=Users}) ->
-  Member = lists:member(Username, Users),
-  if Member =:= false ->
-    Str = "Hello, i entered the room",
-    gen_server:cast(self(), {broadcast, Username,Str}),
-    {noreply, State#room_gen_server_state{connected_users = [Username | Users]}};
+handle_cast({join, UserPid, Username}, State = #room_gen_server_state{connected_users=Users, ispublic = IsPublic}) ->
+  if IsPublic =:= true ->
+    Member = lists:member(Username, Users),
+    if Member =:= false ->
+      Str = "Hello, i joined the room",
+      gen_server:cast(self(), {broadcast, Username,Str}),
+      {noreply, State#room_gen_server_state{connected_users = [Username | Users]}};
+      true ->
+        Message = "You already joined the room ~s\r\n",
+        gen_server:cast(UserPid, {send_message, Message, State#room_gen_server_state.name}),
+        {noreply, State}
+    end;
     true ->
-      Message = "You already joined the room ~s\r\n",
-      gen_server:cast(UserPid, {send_message, Message, State#room_gen_server_state.name}),
+      ErrorMessage = "The room ~s is private, you can not join without an invite\r\n",
+      gen_server:cast(UserPid, {send_message, ErrorMessage, State#room_gen_server_state.name}),
       {noreply, State}
+  end;
+
+handle_cast({invite, UserPid, Username, InvitedUsername}, State = #room_gen_server_state{connected_users=Users}) ->
+  Member = lists:member(Username, Users),
+  if Member =:= true ->
+    InvitedMember = lists:member(InvitedUsername, Users),
+    if InvitedMember  =:= false ->
+      MessageToInvitedUser = "You have been invited to join the room ~s, joining it...\r\n",
+      InviteUserPid = whereis(list_to_atom(InvitedUsername)),
+      gen_server:cast(InviteUserPid, {send_message, MessageToInvitedUser, State#room_gen_server_state.name}),
+      Str = "Hello, i joined the room",
+      gen_server:cast(self(), {broadcast, InvitedUsername,Str}),
+      {noreply, State#room_gen_server_state{connected_users = [InvitedUsername | Users]}};
+    true ->
+      Message = "The user ~s already joined the room ~s\r\n",
+      gen_server:cast(UserPid, {send_message, Message, [InvitedUsername, State#room_gen_server_state.name]}),
+      {noreply, State}
+    end;
+    true ->
+      MessageToInviter = "You are not a member of the room ~s, you can not invite other users\r\n",
+      gen_server:cast(UserPid, {send_message, MessageToInviter, State#room_gen_server_state.name})
   end;
 
 handle_cast({leave, UserPid, Username}, State = #room_gen_server_state{connected_users=Users}) ->
@@ -140,7 +167,9 @@ handle_info(_Info, State = #room_gen_server_state{}) ->
 -spec(terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
     State :: #room_gen_server_state{}) -> term()).
 terminate(_Reason, _State = #room_gen_server_state{}) ->
-  list_rooms_gen_server:remove(_State#room_gen_server_state.name),
+  if _State#room_gen_server_state.ispublic =:= true ->
+    list_rooms_gen_server:remove(_State#room_gen_server_state.name)
+  end,
   ok.
 
 %% @private
@@ -173,6 +202,15 @@ delete_room(UserPid, RoomName, Username) ->
   RoomExists = room_exists(RoomName),
   if RoomExists =:= true ->
     gen_server:cast(whereis(list_to_atom(RoomName)), {delete, UserPid, Username});
+    true ->
+      Str = "Room ~s does not exist, select another room\r\n",
+      gen_server:cast(UserPid, {send_message, Str, RoomName})
+  end.
+
+invite_room(Username, UserPid, RoomName, InvitedUsername) ->
+  RoomExists = room_exists(RoomName),
+  if RoomExists =:= true ->
+    gen_server:cast(whereis(list_to_atom(RoomName)), {invite, UserPid, Username, InvitedUsername});
     true ->
       Str = "Room ~s does not exist, select another room\r\n",
       gen_server:cast(UserPid, {send_message, Str, RoomName})
