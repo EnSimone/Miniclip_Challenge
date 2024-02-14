@@ -31,6 +31,7 @@ Mandatory task:
 	2) Accept multiple TCP/IP client connections at the same time (multiple_connections on git's commit) - 06/02/2024
 	3) Handle rooms (rooms on git's commit) - 13/02/2024
 	4) AWS: create a EC2 instance (AWS_ec2 on git's commit) - 14/02/2024
+	5) AWS: add ASG and ELB (AWS_asg_elb on git's commit) - 14/02/2024
 	6) Send private messages (private_messages on git's commit) - 10/02/2024
 	7) Handle private rooms (private_room on git's commit) - 13/02/2024
 -----
